@@ -1,0 +1,56 @@
+name: Deploy Insurance Work
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: https://insuwork.onesecond.solutions
+    steps:
+      - name: Check source revision
+        id: source
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          sha=$(git ls-remote https://github.com/onesecond-solutions/onesecond.git refs/heads/main | cut -f1)
+          test -n "$sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          deployed=$(curl --max-time 20 -fsS https://insuwork.onesecond.solutions/deployment.json | jq -r '.source' || true)
+          if [ "$EVENT_NAME" = schedule ] && [ "$sha" = "$deployed" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.source.outputs.changed == 'true'
+        with:
+          repository: onesecond-solutions/onesecond
+          ref: ${{ steps.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        if: steps.source.outputs.changed == 'true'
+        with:
+          node-version: '22'
+      - name: Build from canonical product source
+        if: steps.source.outputs.changed == 'true'
+        run: node scripts/build-insuwork-site.mjs . dist/insuwork-site
+      - uses: actions/configure-pages@v5
+        if: steps.source.outputs.changed == 'true'
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.source.outputs.changed == 'true'
+        with:
+          path: dist/insuwork-site
+      - uses: actions/deploy-pages@v4
+        if: steps.source.outputs.changed == 'true'
